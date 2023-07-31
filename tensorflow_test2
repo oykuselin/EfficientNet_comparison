@@ -1,0 +1,82 @@
+#This code is for testing only one model top 5 predict
+import tensorflow as tf
+import json
+import os
+
+# Set up the paths and filenames
+#model_name = 'efficientnet-b0'
+ckpt_dir = "/home/oyku/texas/tpu/models/official/efficientnet/efficientnet-b0"
+labels_map_file = "/home/oyku/texas/tpu/models/official/efficientnet/labelsmap.txt"
+labels_file = "/home/oyku/texas/tpu/models/official/efficientnet/imagenet_metadata.txt"
+ground_truth_labels_file = "/home/oyku/texas/tpu/models/official/efficientnet/2012_validation_labels.txt"
+image_folder = "/home/oyku/texas/ILSVRC2012_img_val"
+
+physical_devices = tf.config.list_physical_devices('GPU')
+if len(physical_devices) > 0:
+    tf.config.experimental.set_memory_growth(physical_devices[0], True)
+
+# Load labels map for predictions
+with open(labels_map_file, "r") as f:
+    labels_map = json.load(f)
+
+file_to_label_mapping = {}
+with open(labels_file, 'r') as f:
+    for line in f.readlines():
+        file_name, label = line.strip().split('\t')
+        file_to_label_mapping[file_name] = label
+
+validation_labels = []
+with open(ground_truth_labels_file, 'r') as f:
+    for line in f.readlines():
+        label = line.strip()
+        if label in file_to_label_mapping:
+            validation_labels.append(label)
+        else:
+            print(f"Skipping validation label {label} as its image couldn't be opened.")
+
+# Initialize variables to track accuracy
+total_images = len(validation_labels)
+correct_predictions = 0
+
+# Get a list of image filenames
+image_filenames = sorted([filename for filename in os.listdir(image_folder) if filename.endswith('.JPEG')])
+
+# Load the model
+model = tf.keras.applications.EfficientNetB7(weights='imagenet')
+
+# Evaluate each image and compare predictions with ground truth
+for i, image_file in enumerate(image_filenames, 1):
+    image_path = os.path.join(image_folder, image_file)
+    image = tf.keras.preprocessing.image.load_img(image_path, target_size=(600, 600))
+    image_array = tf.keras.preprocessing.image.img_to_array(image)
+    image_array = tf.expand_dims(image_array, 0)
+
+    # Preprocess the image for the model
+    image_array = tf.keras.applications.efficientnet.preprocess_input(image_array)
+
+    # Run the prediction
+    predictions = model.predict(image_array)
+    top5_indices = tf.argsort(predictions[0], direction='DESCENDING')[:5]
+    top5_indices = top5_indices.numpy()  # Convert tensor to numpy array
+    top5_labels = [labels_map[str(idx)] for idx in top5_indices]
+
+    # Get the ground truth label for the image
+    ground_truth_label = validation_labels[i - 1]
+    ground_truth_label_mapped = file_to_label_mapping[ground_truth_label]
+    print("Image {}/{} - Ground Truth: {}, Corresponding Label: {}".format(i, total_images, ground_truth_label, ground_truth_label_mapped))
+
+    if ground_truth_label_mapped in top5_labels:
+        correct_predictions += 1
+        print("correct predictions {}".format(correct_predictions))
+    else:
+        print("Prediction: Incorrect")
+
+# Calculate accuracy
+accuracy = correct_predictions / total_images
+
+# Save accuracy to a text file
+with open("accuracy.txt", "w") as f:
+    f.write(str(accuracy))
+
+# Print the accuracy
+print("Accuracy:", accuracy)
